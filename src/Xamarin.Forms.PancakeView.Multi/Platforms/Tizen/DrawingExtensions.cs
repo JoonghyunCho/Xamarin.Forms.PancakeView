@@ -22,6 +22,23 @@ namespace Xamarin.Forms.PancakeView.Tizen
             return path;
         }
 
+        static public SKPath CreateRoundedRectPath(int left, int top, int width, int height, CornerRadius cornerRadius)
+        {
+            var path = new SKPath();
+            var skRoundRect = new SKRoundRect(new SKRect(left, top, width, height));
+            SKPoint[] radii = new SKPoint[4]
+            {
+                new SKPoint((float)cornerRadius.TopLeft, (float)cornerRadius.TopLeft),
+                new SKPoint((float)cornerRadius.TopRight, (float)cornerRadius.TopRight),
+                new SKPoint((float)cornerRadius.BottomRight, (float)cornerRadius.BottomRight),
+                new SKPoint((float)cornerRadius.BottomLeft, (float)cornerRadius.BottomLeft)
+            };
+            skRoundRect.SetRectRadii(skRoundRect.Rect, radii);
+            path.AddRoundRect(skRoundRect);
+            path.Close();
+            return path;
+        }
+
         public static SKPath CreatePolygonPath(float rectWidth, float rectHeight, int sides, double cornerRadius = 0.0, double rotationOffset = 0.0)
         {
             var offsetRadians = rotationOffset * Math.PI / 180;

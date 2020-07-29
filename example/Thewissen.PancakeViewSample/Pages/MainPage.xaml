@@ -294,8 +294,8 @@
                         Style="{StaticResource small_button}" Command="{Binding GenerateRandomShadowOffsetCommand}" />
             </Grid>
 
-            <yummy:PancakeView Margin="0,32,0,0" BackgroundColor="#96e7a7" Padding="20,0"
-                               HorizontalOptions="FillAndExpand" HeightRequest="150" CornerRadius="20">
+            <yummy:PancakeView  BackgroundColor="#96e7a7" HorizontalOptions="Center" VerticalOptions="Center"
+                               WidthRequest="300" HeightRequest="150" CornerRadius="20">
 
                 <yummy:PancakeView.Shadow>
                     <yummy:DropShadow x:Name="shadow" Color="{Binding ShadowColor}" Offset="{Binding ShadowOffset}" />

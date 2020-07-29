@@ -12,6 +12,14 @@ using SkiaSharp.Views.Tizen;
 [assembly: ExportRenderer(typeof(Controls.PancakeView), typeof(PancakeViewRenderer))]
 namespace Xamarin.Forms.PancakeView.Tizen
 {
+    internal static class Interop
+    {
+        const string Evas = "libevas.so.1";
+
+        [System.Runtime.InteropServices.DllImport(Evas)]
+        internal static extern void evas_object_clip_unset(IntPtr obj);
+    }
+
     public class PancakeViewRenderer : LayoutRenderer
     {
         SKCanvasView _skCanvasView;
@@ -40,6 +48,7 @@ namespace Xamarin.Forms.PancakeView.Tizen
                 _skCanvasView.PaintSurface += OnPaintSurface;
                 _skCanvasView.Show();
                 Control.Children.Add(_skCanvasView);
+                Interop.evas_object_clip_unset(_skCanvasView);
                 Control.LayoutUpdated += OnLayoutUpdated;
             }
             base.OnElementChanged(e);
@@ -85,11 +94,49 @@ namespace Xamarin.Forms.PancakeView.Tizen
             {
                 Invalidate();
             }
+            else if (e.PropertyName == PancakeView.ShadowProperty.PropertyName)
+            {
+                UpdateGeometry();
+                Invalidate();
+            }
+        }
+
+        private void UpdateGeometry()
+        {
+            Console.WriteLine("UpdateGeometry()");
+            var pancake = Element as PancakeView;
+            if(pancake.Shadow != null)
+            {
+                double left = 0;
+                double top = 0;
+                double right = 0;
+                double bottom = 0;
+                var scaledOffsetX = Forms.ConvertToScaledPixel(pancake.Shadow.Offset.X);
+                var scaledOffsetY = Forms.ConvertToScaledPixel(pancake.Shadow.Offset.Y);
+                var scaledBlurRadius = Forms.ConvertToScaledPixel(pancake.Shadow.BlurRadius);
+                var spreadSize = scaledBlurRadius * 2 + scaledBlurRadius;
+                var sl = scaledOffsetX - spreadSize;
+                var sr = scaledOffsetX + spreadSize;
+                var st = scaledOffsetY - spreadSize;
+                var sb = scaledOffsetY + spreadSize;
+                if (left > sl) left = sl;
+                if (top > st) top = st;
+                if (right < sr) right = sr;
+                if (bottom < sb) bottom = sb;
+
+                var geometry = NativeView.Geometry;
+                _skCanvasView.Geometry = new ElmSharp.Rect(geometry.X + (int)left, geometry.Y + (int)top, geometry.Width + (int)right - (int)left, geometry.Height + (int)bottom - (int)top);
+            }
         }
 
         private void OnLayoutUpdated(object sender, LayoutEventArgs e)
         {
             _skCanvasView.Geometry = Control.Geometry;
+
+            if((Element as PancakeView).Shadow != null)
+            {
+                UpdateGeometry();
+            }
         }
 
         private void OnPaintSurface(object sender, SKPaintSurfaceEventArgs e)
@@ -98,6 +145,7 @@ namespace Xamarin.Forms.PancakeView.Tizen
             var canvas = surface.Canvas;
             canvas.Clear();
             DrawBackground(canvas);
+            DrawShadow(canvas);
             DrawBorder(canvas);
         }
 
@@ -112,12 +160,14 @@ namespace Xamarin.Forms.PancakeView.Tizen
                 SKPath path;
                 if (pancake.Sides != 4)
                 {
-                    path = DrawingExtensions.CreatePolygonPath(_skCanvasView.Geometry.Width, _skCanvasView.Geometry.Height,
+                    path = DrawingExtensions.CreatePolygonPath(Control.Geometry.Width, Control.Geometry.Height,
                         pancake.Sides, pancake.CornerRadius.TopLeft, pancake.OffsetAngle);
                 }
                 else
                 {
-                    path = DrawingExtensions.CreateRoundedRectPath(_skCanvasView.Geometry.Width, _skCanvasView.Geometry.Height, pancake.CornerRadius);
+                    var left = NativeView.Geometry.Left - _skCanvasView.Geometry.Left;
+                    var top = NativeView.Geometry.Top - _skCanvasView.Geometry.Top;
+                    path = DrawingExtensions.CreateRoundedRectPath(left, top, left + NativeView.Geometry.Width, top + NativeView.Geometry.Height, pancake.CornerRadius);
                 }
 
                 if (pancake.BackgroundGradientStops != null && pancake.BackgroundGradientStops.Any())
@@ -125,8 +175,8 @@ namespace Xamarin.Forms.PancakeView.Tizen
                     var orderedStops = pancake.BackgroundGradientStops.OrderBy(x => x.Offset).ToList();
                     var gradientColors = orderedStops.Select(x => x.Color.ToNative().ToSKColor()).ToArray();
                     var gradientColorPos = orderedStops.Select(x => x.Offset).ToArray();
-                    var startPoint = new SKPoint((float)(pancake.BackgroundGradientStartPoint.X * _skCanvasView.Geometry.Width), (float)(pancake.BackgroundGradientStartPoint.Y * _skCanvasView.Geometry.Height));
-                    var endPoint = new SKPoint((float)(pancake.BackgroundGradientEndPoint.X * _skCanvasView.Geometry.Width), (float)(pancake.BackgroundGradientEndPoint.Y * _skCanvasView.Geometry.Height));
+                    var startPoint = new SKPoint((float)(pancake.BackgroundGradientStartPoint.X * Control.Geometry.Width), (float)(pancake.BackgroundGradientStartPoint.Y * Control.Geometry.Height));
+                    var endPoint = new SKPoint((float)(pancake.BackgroundGradientEndPoint.X * Control.Geometry.Width), (float)(pancake.BackgroundGradientEndPoint.Y * Control.Geometry.Height));
                     paint.Shader = SKShader.CreateLinearGradient(startPoint, endPoint, gradientColors, gradientColorPos, SKShaderTileMode.Clamp);
                 }
                 else
@@ -134,33 +184,36 @@ namespace Xamarin.Forms.PancakeView.Tizen
                     paint.Color = pancake.BackgroundColor.ToNative().ToSKColor();
                 }
                 canvas.ClipPath(path, SKClipOperation.Intersect, true);
+                canvas.Save();
                 canvas.DrawPath(path, paint);
+                canvas.Restore();
             }
         }
 
         private void DrawBorder(SKCanvas canvas)
         {
-            using (var paint = new SKPaint())
+            var pancake = Element as PancakeView;
+            if (pancake.Border != null && pancake.Border.Thickness != default)
             {
-                var pancake = Element as PancakeView;
-                if (pancake.Border != null && pancake.Border.Thickness != default)
+                using (var paint = new SKPaint())
                 {
                     var border = pancake.Border;
-                    var boderColor = border.Color == Color.Default ? Color.Default : border.Color;
                     paint.Style = SKPaintStyle.Stroke;
-                    paint.Color = boderColor.ToNative().ToSKColor();
-                    paint.StrokeWidth = border.Thickness;
+                    paint.Color = border.Color.ToNative().ToSKColor();
+                    paint.StrokeWidth = Forms.ConvertToScaledPixel(border.Thickness);
                     paint.IsAntialias = true;
 
                     SKPath path;
                     if (pancake.Sides != 4)
                     {
-                        path = DrawingExtensions.CreatePolygonPath(_skCanvasView.Geometry.Width, _skCanvasView.Geometry.Height,
+                        path = DrawingExtensions.CreatePolygonPath(Control.Geometry.Width, Control.Geometry.Height,
                             pancake.Sides, pancake.CornerRadius.TopLeft, pancake.OffsetAngle);
                     }
                     else
                     {
-                        path = DrawingExtensions.CreateRoundedRectPath(_skCanvasView.Geometry.Width, _skCanvasView.Geometry.Height, pancake.CornerRadius);
+                        var left = NativeView.Geometry.Left - _skCanvasView.Geometry.Left;
+                        var top = NativeView.Geometry.Top - _skCanvasView.Geometry.Top;
+                        path = DrawingExtensions.CreateRoundedRectPath(left, top, left + NativeView.Geometry.Width, top + NativeView.Geometry.Height, pancake.CornerRadius);
                     }
 
                     if (border.DashPattern.Pattern != null && border.DashPattern.Pattern.Length > 0)
@@ -173,21 +226,76 @@ namespace Xamarin.Forms.PancakeView.Tizen
 
                     if (border.GradientStops != null && border.GradientStops.Any())
                     {
-                        var startPoint = new SKPoint((float)(border.GradientStartPoint.X * _skCanvasView.Geometry.Width), (float)(border.GradientStartPoint.Y * _skCanvasView.Geometry.Height));
-                        var endPoint = new SKPoint((float)(border.GradientEndPoint.X * _skCanvasView.Geometry.Width), (float)(border.GradientEndPoint.Y * _skCanvasView.Geometry.Height));
+                        var startPoint = new SKPoint((float)(border.GradientStartPoint.X * Control.Geometry.Width), (float)(border.GradientStartPoint.Y * Control.Geometry.Height));
+                        var endPoint = new SKPoint((float)(border.GradientEndPoint.X * Control.Geometry.Width), (float)(border.GradientEndPoint.Y * Control.Geometry.Height));
                         var orderedStops = border.GradientStops.OrderBy(x => x.Offset).ToList();
                         var gradientColors = orderedStops.Select(x => x.Color.ToNative().ToSKColor()).ToArray();
                         var gradientColorPos = orderedStops.Select(x => x.Offset).ToArray();
                         paint.Shader = SKShader.CreateLinearGradient(startPoint, endPoint, gradientColors, gradientColorPos, SKShaderTileMode.Clamp);
                     }
                     canvas.ClipPath(path, SKClipOperation.Intersect, true);
+                    canvas.Save();
                     canvas.DrawPath(path, paint);
+                    canvas.Restore();
                 }
+            }
+        }
+
+        private void DrawShadow(SKCanvas canvas)
+        {
+            var pancake = Element as PancakeView;
+            if (pancake.Shadow != null)
+            {
+                SKPath path;
+                if (pancake.Sides != 4)
+                {
+                    path = DrawingExtensions.CreatePolygonPath(Control.Geometry.Width, Control.Geometry.Height,
+                        pancake.Sides, pancake.CornerRadius.TopLeft, pancake.OffsetAngle);
+                }
+                else
+                {
+                    var left = NativeView.Geometry.Left - _skCanvasView.Geometry.Left;
+                    var top = NativeView.Geometry.Top - _skCanvasView.Geometry.Top;
+                    path = DrawingExtensions.CreateRoundedRectPath(left, top, left + NativeView.Geometry.Width, top + NativeView.Geometry.Height, pancake.CornerRadius);
+                }
+
+                using (var paint = new SKPaint())
+                {
+                    paint.IsAntialias = true;
+                    paint.Style = SKPaintStyle.StrokeAndFill;
+                    var shadow = pancake.Shadow;
+
+                    var scaledOffsetX = Forms.ConvertToScaledPixel(shadow.Offset.X);
+                    var scaledOffsetY = Forms.ConvertToScaledPixel(shadow.Offset.Y);
+                    var scaledBlurRadius = Forms.ConvertToScaledPixel(shadow.BlurRadius);
+
+                    canvas.Save();
+                    canvas.ClipPath(path, SKClipOperation.Difference, true);
+                    paint.ImageFilter = SKImageFilter.CreateDropShadow(
+                        scaledOffsetX,
+                        scaledOffsetY,
+                        scaledBlurRadius,
+                        scaledBlurRadius,
+                        shadow.Color.MultiplyAlpha(shadow.Opacity).ToNative().ToSKColor(),
+                        SKDropShadowImageFilterShadowMode.DrawShadowOnly);
+                    canvas.DrawPath(path, paint);
+                    canvas.Restore();
+
+                    canvas.Save();
+                    canvas.ClipPath(path, SKClipOperation.Intersect, true);
+                    canvas.DrawPath(path, paint);
+                    canvas.Restore();
+                }
+            }
+            else
+            {
+                // ?
             }
         }
 
         private void Invalidate()
         {
+            Console.WriteLine("Invalidate()");
             _skCanvasView.Invalidate();
         }
     }
